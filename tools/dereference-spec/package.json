@@ -18,6 +18,6 @@
         "conf": "^9.0.2"
     },
     "bin": {
-        "oapi-deref": "index.js",
+        "oapi-deref": "index.js"
     }
 }
