@@ -16,6 +16,7 @@ package registry
 
 import (
 	"context"
+	"github.com/getkin/kin-openapi/openapi3"
 	"strings"
 	"sync"
 
@@ -183,6 +184,14 @@ func (s *RegistryServer) GetApiSpecContents(ctx context.Context, req *rpc.GetApi
 	}
 	defer db.Close()
 
+	// split the results
+	pathOp := strings.Split(req.GetName(), "#")
+	var opID string
+	if len(pathOp) == 2 {
+		// assign so does not fail
+		req.Name = pathOp[0]
+		opID = pathOp[1]
+	}
 	var specName = req.GetName()
 	var spec *models.Spec
 	var revisionName names.SpecRevision
@@ -207,6 +216,48 @@ func (s *RegistryServer) GetApiSpecContents(ctx context.Context, req *rpc.GetApi
 		contents, err := models.GUnzippedBytes(blob.Contents)
 		if err != nil {
 			return nil, status.Errorf(codes.FailedPrecondition, "failed to unzip contents with gzip MIME type: %s", err)
+		}
+
+		// if op id was provided we need to look it up
+		if opID != "" {
+			loader := openapi3.NewLoader()
+			l, err := loader.LoadFromData(contents)
+			if err != nil {
+				return nil, status.Errorf(codes.FailedPrecondition, "failed retrieving operation id: %s", err)
+			}
+			loader.ResolveRefsIn(l, nil)
+			var foundOp openapi3.Operation
+			for _, path := range l.Paths {
+				var ops []*openapi3.Operation
+				if path.Get != nil {
+					ops = append(ops, path.Get)
+				}
+				if path.Patch != nil {
+					ops = append(ops, path.Patch)
+				}
+				if path.Put != nil {
+					ops = append(ops, path.Put)
+				}
+				if path.Delete != nil {
+					ops = append(ops, path.Delete)
+				}
+				if path.Post != nil {
+					ops = append(ops, path.Post)
+				}
+				for _, v := range ops {
+					if v.OperationID == opID {
+						foundOp = *v
+					}
+				}
+			}
+			if foundOp.OperationID == "" {
+				return nil, status.Errorf(codes.FailedPrecondition, "could not find operation id: %s", opID)
+			}
+			contents, err = foundOp.MarshalJSON()
+			if err != nil {
+				return nil, status.Errorf(codes.FailedPrecondition, "failed marshalling json: %s", err)
+			}
+
 		}
 		return &httpbody.HttpBody{
 			ContentType: strings.Replace(spec.MimeType, "+gzip", "", 1),

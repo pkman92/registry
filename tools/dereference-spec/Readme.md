@@ -1,0 +1,1 @@
+registry upload bulk openapi --project-id $PROJECT apispecs2
